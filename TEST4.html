@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Green Digital Clock with PS4 Flow</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body, html {
+            width: 100vw;
+            height: 100vh;
+            background-color: #050a05; /* Deepened the background slightly for contrast */
+            font-family: 'Century Gothic', 'URW Gothic L', 'Apple Gothic', Futura, sans-serif;
+            color: #38e07a; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        #flow-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0; 
+        }
+
+        .clock-container {
+            display: flex;
+            flex-direction: column;
+            width: 95vw; 
+            text-align: center;
+            position: relative; 
+            z-index: 10; 
+        }
+
+        .time {
+            font-size: 19vw; 
+            line-height: 1;
+            font-weight: normal;
+            letter-spacing: 0.5vw;
+            white-space: nowrap; 
+        }
+
+        @keyframes flashWhite {
+            0% {
+                color: #ffffff;
+                text-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 0 0 40px rgba(255, 255, 255, 0.4);
+            }
+            100% {
+                color: #38e07a;
+                text-shadow: 0 0 0px transparent;
+            }
+        }
+
+        .divider {
+            width: 100%;
+            height: 1vw; 
+            min-height: 4px; 
+            background-color: #38e07a;
+            margin: 3.5vh 0; 
+            box-shadow: 0 0 15px rgba(56, 224, 122, 0.6); 
+        }
+
+        .date {
+            font-size: 13vw; 
+            line-height: 1;
+            font-weight: normal;
+            letter-spacing: 0.5vw;
+            white-space: nowrap; 
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="flow-canvas"></canvas>
+
+    <div class="clock-container">
+        <div class="time">
+            <span id="hours">00</span>:<span id="mins">00</span>:<span id="secs">00</span>
+        </div>
+        <div class="divider"></div>
+        <div class="date" id="date">SUN, 01 JAN</div>
+    </div>
+
+    <script>
+        // --- CLOCK LOGIC (Unchanged) ---
+        const hoursEl = document.getElementById('hours');
+        const minsEl = document.getElementById('mins');
+        const secsEl = document.getElementById('secs');
+        const dateEl = document.getElementById('date');
+        
+        let lastHour = -1;
+        let lastMinute = -1;
+        let lastSecond = -1;
+
+        function triggerFlash(el) {
+            el.style.animation = 'none';
+            void el.offsetWidth; 
+            el.style.animation = 'flashWhite 0.8s cubic-bezier(0.215, 0.610, 0.355, 1.000) forwards';
+        }
+
+        function updateClock() {
+            const now = new Date();
+            
+            const hours = now.getHours().toString().padStart(2, '0');
+            const mins = now.getMinutes().toString().padStart(2, '0');
+            const secs = now.getSeconds().toString().padStart(2, '0');
+            
+            if (hours !== lastHour) {
+                hoursEl.textContent = hours;
+                if (lastHour !== -1) triggerFlash(hoursEl); 
+                lastHour = hours;
+            }
+
+            if (mins !== lastMinute) {
+                minsEl.textContent = mins;
+                if (lastMinute !== -1) triggerFlash(minsEl);
+                lastMinute = mins;
+            }
+
+            if (secs !== lastSecond) {
+                secsEl.textContent = secs;
+                triggerFlash(secsEl); 
+                lastSecond = secs;
+            }
+            
+            const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+            const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+            
+            const dayName = days[now.getDay()];
+            const dayNum = now.getDate(); 
+            const monthName = months[now.getMonth()];
+            
+            dateEl.textContent = `${dayName}, ${dayNum} ${monthName}`;
+        }
+
+        // --- PS4 FLOW ANIMATION LOGIC ---
+        const canvas = document.getElementById('flow-canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        let particles = [];
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            
+            // Re-initialize particles on resize to fit the new screen
+            particles = [];
+            for(let i = 0; i < 40; i++) {
+                particles.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 2 + 0.5,
+                    speedX: (Math.random() - 0.5) * 0.3,
+                    speedY: (Math.random() - 0.5) * 0.3 - 0.2, // Drift slightly upwards
+                    baseOpacity: Math.random() * 0.5 + 0.1
+                });
+            }
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function drawFlow() {
+            updateClock();
+            ctx.clearRect(0, 0, width, height);
+            
+            // Slower time divider for that calm PS4 feel
+            let time = Date.now() / 4000; 
+
+            // Draw 2 sweeping, thick Bezier ribbons
+            for (let i = 0; i < 2; i++) {
+                ctx.beginPath();
+                
+                // Start off-screen left
+                ctx.moveTo(-100, height * (0.6 + i * 0.2)); 
+                
+                // Calculate dynamic control points that drift over time
+                let cp1x = width * 0.3 + Math.sin(time + i) * (width * 0.3);
+                let cp1y = height * 0.2 + Math.cos(time * 0.8 + i) * (height * 0.4);
+                let cp2x = width * 0.7 + Math.cos(time * 1.2 - i) * (width * 0.3);
+                let cp2y = height * 0.8 + Math.sin(time * 0.9 - i) * (height * 0.4);
+                
+                // Draw the sweeping curve to off-screen right
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, width + 100, height * (0.3 + i * 0.3));
+                
+                // Close the shape down to the bottom of the screen
+                ctx.lineTo(width + 100, height + 100);
+                ctx.lineTo(-100, height + 100);
+                ctx.closePath();
+                
+                // Use a soft, sheer green fill
+                ctx.fillStyle = `rgba(56, 224, 122, ${0.05 + i * 0.03})`;
+                ctx.fill();
+
+                // Draw a brighter line on the top edge of the ribbon to define it
+                ctx.beginPath();
+                ctx.moveTo(-100, height * (0.6 + i * 0.2));
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, width + 100, height * (0.3 + i * 0.3));
+                ctx.strokeStyle = `rgba(56, 224, 122, ${0.15 + i * 0.05})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            // Draw and update the floating dust particles
+            particles.forEach(p => {
+                p.x += p.speedX;
+                p.y += p.speedY;
+                
+                // Wrap particles around the screen
+                if(p.y < 0) p.y = height;
+                if(p.y > height) p.y = 0;
+                if(p.x < 0) p.x = width;
+                if(p.x > width) p.x = 0;
+                
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                
+                // Twinkle effect using sine wave on opacity
+                let currentOpacity = p.baseOpacity + Math.sin(time * 5 + p.x) * 0.2;
+                ctx.fillStyle = `rgba(56, 224, 122, ${Math.max(0, currentOpacity)})`;
+                ctx.fill();
+            });
+            
+            requestAnimationFrame(drawFlow);
+        }
+
+        // Start the master animation loop
+        drawFlow();
+    </script>
+</body>
+</html>
