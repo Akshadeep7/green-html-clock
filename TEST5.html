@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Dynamic Flow Clock</title>
+    <style>
+        /* NEW: Set up CSS Variables for seamless theme switching */
+        :root {
+            --theme-color: #38e07a;
+            --theme-glow: rgba(56, 224, 122, 0.6);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body, html {
+            width: 100vw;
+            height: 100vh;
+            background-color: #050a05; 
+            font-family: 'Century Gothic', 'URW Gothic L', 'Apple Gothic', Futura, sans-serif;
+            /* Text now pulls from the variable */
+            color: var(--theme-color); 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            transition: color 1s ease; /* Smooth fade when the hour changes */
+        }
+
+        #flow-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0; 
+        }
+
+        .clock-container {
+            display: flex;
+            flex-direction: column;
+            width: 95vw; 
+            text-align: center;
+            position: relative; 
+            z-index: 10; 
+        }
+
+        .time {
+            font-size: 19vw; 
+            line-height: 1;
+            font-weight: normal;
+            letter-spacing: 0.5vw;
+            white-space: nowrap; 
+        }
+
+        @keyframes flashWhite {
+            0% {
+                color: #ffffff;
+                text-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 0 0 40px rgba(255, 255, 255, 0.4);
+            }
+            100% {
+                /* Fades back to whatever the current theme is */
+                color: var(--theme-color);
+                text-shadow: 0 0 0px transparent;
+            }
+        }
+
+        .divider {
+            width: 100%;
+            height: 1vw; 
+            min-height: 4px; 
+            background-color: var(--theme-color);
+            margin: 3.5vh 0; 
+            box-shadow: 0 0 15px var(--theme-glow); 
+            transition: background-color 1s ease, box-shadow 1s ease;
+        }
+
+        .date {
+            font-size: 13vw; 
+            line-height: 1;
+            font-weight: normal;
+            letter-spacing: 0.5vw;
+            white-space: nowrap; 
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="flow-canvas"></canvas>
+
+    <div class="clock-container">
+        <div class="time">
+            <span id="hours">00</span>:<span id="mins">00</span>:<span id="secs">00</span>
+        </div>
+        <div class="divider"></div>
+        <div class="date" id="date">SUN, 01 JAN</div>
+    </div>
+
+    <script>
+        // --- CLOCK & THEME LOGIC ---
+        const hoursEl = document.getElementById('hours');
+        const minsEl = document.getElementById('mins');
+        const secsEl = document.getElementById('secs');
+        const dateEl = document.getElementById('date');
+        
+        let lastHour = -1;
+        let lastMinute = -1;
+        let lastSecond = -1;
+
+        // Variables for the canvas to read
+        let themeR = 56, themeG = 224, themeB = 122; 
+
+        function triggerFlash(el) {
+            el.style.animation = 'none';
+            void el.offsetWidth; 
+            el.style.animation = 'flashWhite 0.8s cubic-bezier(0.215, 0.610, 0.355, 1.000) forwards';
+        }
+
+        function applyTheme(hour) {
+            let hex;
+            if (hour >= 6 && hour < 17) {
+                // Morning: Sky Blue
+                hex = '#38bdf8'; themeR = 56; themeG = 189; themeB = 248;
+            } else if (hour >= 17 && hour < 20) {
+                // Evening: Orange
+                hex = '#fb923c'; themeR = 251; themeG = 146; themeB = 60;
+            } else {
+                // Night: Green
+                hex = '#38e07a'; themeR = 56; themeG = 224; themeB = 122;
+            }
+
+            // Update CSS globally
+            document.documentElement.style.setProperty('--theme-color', hex);
+            document.documentElement.style.setProperty('--theme-glow', `rgba(${themeR}, ${themeG}, ${themeB}, 0.6)`);
+        }
+
+        function updateClock() {
+            const now = new Date();
+            const currentHourNum = now.getHours();
+            
+            // Apply the theme based on the current hour
+            applyTheme(currentHourNum);
+            
+            const hours = currentHourNum.toString().padStart(2, '0');
+            const mins = now.getMinutes().toString().padStart(2, '0');
+            const secs = now.getSeconds().toString().padStart(2, '0');
+            
+            if (hours !== lastHour) {
+                hoursEl.textContent = hours;
+                if (lastHour !== -1) triggerFlash(hoursEl); 
+                lastHour = hours;
+            }
+
+            if (mins !== lastMinute) {
+                minsEl.textContent = mins;
+                if (lastMinute !== -1) triggerFlash(minsEl);
+                lastMinute = mins;
+            }
+
+            if (secs !== lastSecond) {
+                secsEl.textContent = secs;
+                triggerFlash(secsEl); 
+                lastSecond = secs;
+            }
+            
+            const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+            const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+            
+            const dayName = days[now.getDay()];
+            const dayNum = now.getDate(); 
+            const monthName = months[now.getMonth()];
+            
+            dateEl.textContent = `${dayName}, ${dayNum} ${monthName}`;
+        }
+
+        // --- PS4 FLOW ANIMATION LOGIC ---
+        const canvas = document.getElementById('flow-canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        let particles = [];
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            
+            particles = [];
+            for(let i = 0; i < 40; i++) {
+                particles.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 2 + 0.5,
+                    speedX: (Math.random() - 0.5) * 0.3,
+                    speedY: (Math.random() - 0.5) * 0.3 - 0.2, 
+                    baseOpacity: Math.random() * 0.5 + 0.1
+                });
+            }
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function drawFlow() {
+            updateClock();
+            ctx.clearRect(0, 0, width, height);
+            
+            let time = Date.now() / 4000; 
+
+            for (let i = 0; i < 2; i++) {
+                ctx.beginPath();
+                ctx.moveTo(-100, height * (0.6 + i * 0.2)); 
+                
+                let cp1x = width * 0.3 + Math.sin(time + i) * (width * 0.3);
+                let cp1y = height * 0.2 + Math.cos(time * 0.8 + i) * (height * 0.4);
+                let cp2x = width * 0.7 + Math.cos(time * 1.2 - i) * (width * 0.3);
+                let cp2y = height * 0.8 + Math.sin(time * 0.9 - i) * (height * 0.4);
+                
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, width + 100, height * (0.3 + i * 0.3));
+                
+                ctx.lineTo(width + 100, height + 100);
+                ctx.lineTo(-100, height + 100);
+                ctx.closePath();
+                
+                // Canvas pulls the dynamic RGB colors
+                ctx.fillStyle = `rgba(${themeR}, ${themeG}, ${themeB}, ${0.05 + i * 0.03})`;
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.moveTo(-100, height * (0.6 + i * 0.2));
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, width + 100, height * (0.3 + i * 0.3));
+                ctx.strokeStyle = `rgba(${themeR}, ${themeG}, ${themeB}, ${0.15 + i * 0.05})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            particles.forEach(p => {
+                p.x += p.speedX;
+                p.y += p.speedY;
+                
+                if(p.y < 0) p.y = height;
+                if(p.y > height) p.y = 0;
+                if(p.x < 0) p.x = width;
+                if(p.x > width) p.x = 0;
+                
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                
+                let currentOpacity = p.baseOpacity + Math.sin(time * 5 + p.x) * 0.2;
+                ctx.fillStyle = `rgba(${themeR}, ${themeG}, ${themeB}, ${Math.max(0, currentOpacity)})`;
+                ctx.fill();
+            });
+            
+            requestAnimationFrame(drawFlow);
+        }
+
+        drawFlow();
+    </script>
+</body>
+</html>
