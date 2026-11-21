@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Dynamic Flow Clock</title>
+    <style>
+        :root {
+            --theme-color: #38e07a;
+            --theme-accent: #2dd4bf;
+            --theme-glow: rgba(56, 224, 122, 0.55);
+            --theme-soft: rgba(56, 224, 122, 0.14);
+            --bg-tint: #030b07;
+            --fg-zoom: 1;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-tint);
+            font-family: 'Century Gothic', 'Futura', 'Avenir Next', 'Segoe UI', sans-serif;
+            color: var(--theme-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            user-select: none;
+            transition: background-color 1.2s ease, color 1.2s ease;
+        }
+
+        /* Disable slow CSS color transitions during live Rainbow RGB mode */
+        body.rainbow-active,
+        body.rainbow-active .clock-container,
+        body.rainbow-active .clock-container::before,
+        body.rainbow-active .ambient-aura {
+            transition-duration: 0s !important;
+        }
+
+        .ambient-aura {
+            position: fixed;
+            inset: -20%;
+            background:
+                radial-gradient(circle at 50% 45%, var(--theme-soft) 0%, transparent 55%),
+                radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.025) 0%, transparent 45%);
+            pointer-events: none;
+            z-index: 0;
+            transition: background 1.2s ease;
+        }
+
+        .vignette {
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at center, transparent 45%, rgba(0, 0, 0, 0.72) 100%);
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        #flow-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            opacity: 1;
+            transition: opacity 0.5s ease;
+        }
+
+        #flow-canvas.hidden {
+            opacity: 0;
+        }
+
+        .stage {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: env(safe-area-inset-top) 2vw env(safe-area-inset-bottom);
+            perspective: 1400px;
+        }
+
+        /* Sleek Frosted Glass Card */
+        .clock-container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: fit-content;
+            min-width: min(90vw, 1200px);
+            max-width: 96vw;
+            padding: clamp(1rem, 4.5vh, 4.25rem) clamp(1rem, 3.8vw, 3.75rem);
+            border-radius: clamp(20px, 3vw, 44px);
+            background: linear-gradient(
+                145deg,
+                rgba(255, 255, 255, 0.055) 0%,
+                rgba(255, 255, 255, 0.015) 55%,
+                rgba(0, 0, 0, 0.25) 100%
+            );
+            backdrop-filter: blur(18px) saturate(135%);
+            -webkit-backdrop-filter: blur(18px) saturate(135%);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            box-shadow:
+                0 30px 80px rgba(0, 0, 0, 0.65),
+                inset 0 1px 0 rgba(255, 255, 255, 0.16),
+                0 0 60px -15px var(--theme-soft);
+            text-align: center;
+            transform-style: preserve-3d;
+            transition:
+                transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1),
+                background 0.4s ease,
+                border-color 0.4s ease,
+                box-shadow 0.4s ease;
+        }
+
+        .clock-container::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 12%;
+            right: 12%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--theme-color), transparent);
+            opacity: 0.55;
+            transition: opacity 0.4s ease, background 1.2s ease;
+        }
+
+        /* Frosted glass OFF state */
+        .clock-container.no-frost {
+            background: transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            border-color: transparent;
+            box-shadow: none;
+        }
+
+        .clock-container.no-frost::before {
+            opacity: 0;
+        }
+
+        /* Time Display (scales with --fg-zoom) */
+        .time-wrap {
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+            gap: 0.18em;
+        }
+
+        .time {
+            font-size: calc(min(16vw, 26vh) * var(--fg-zoom));
+            line-height: 1;
+            font-weight: 400;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+            text-shadow: 0 0 28px var(--theme-soft);
+        }
+
+        .time span.digit {
+            display: inline-block;
+            will-change: transform, color, text-shadow;
+        }
+
+        .colon {
+            display: inline-block;
+            opacity: 0.75;
+            transform: translateY(-0.06em);
+            animation: colonBreathe 2s ease-in-out infinite;
+        }
+
+        @keyframes colonBreathe {
+            0%, 100% { opacity: 0.35; }
+            50% { opacity: 0.95; }
+        }
+
+        .ampm {
+            font-size: calc(min(3.2vw, 5vh) * var(--fg-zoom));
+            letter-spacing: 0.15em;
+            color: rgba(255, 255, 255, 0.65);
+            font-weight: 600;
+            display: none;
+        }
+
+        .ampm.visible {
+            display: inline-block;
+        }
+
+        /* No 'forwards' and no locked 100% color so Rainbow RGB never freezes on WebKit */
+        @keyframes flashWhite {
+            0% {
+                color: #ffffff;
+                transform: scale(1.045);
+                text-shadow:
+                    0 0 18px rgba(255, 255, 255, 0.95),
+                    0 0 42px var(--theme-glow);
+            }
+            100% {
+                transform: scale(1);
+                text-shadow: 0 0 28px var(--theme-soft);
+            }
+        }
+
+        /* Laser-Beam Minute Progress Divider (scales thickness & spacing with --fg-zoom) */
+        .divider-track {
+            position: relative;
+            width: 100%;
+            height: calc(clamp(4px, 0.72vw, 9px) * (0.65 + 0.35 * var(--fg-zoom)));
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            margin: calc(clamp(0.9rem, 3.2vh, 2.8rem) * (0.7 + 0.3 * var(--fg-zoom))) 0;
+            overflow: visible;
+        }
+
+        .divider-fill {
+            position: relative;
+            height: 100%;
+            width: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, var(--theme-soft), var(--theme-color), #ffffff);
+            box-shadow: 0 0 18px var(--theme-glow);
+            transform-origin: left center;
+            transform: scaleX(0);
+            will-change: transform;
+        }
+
+        .divider-spark {
+            position: absolute;
+            top: 50%;
+            left: 0%;
+            width: calc(clamp(10px, 1.45vw, 18px) * (0.65 + 0.35 * var(--fg-zoom)));
+            height: calc(clamp(10px, 1.45vw, 18px) * (0.65 + 0.35 * var(--fg-zoom)));
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 0 14px #ffffff, 0 0 28px var(--theme-color);
+            transform: translate(-50%, -50%);
+            will-change: left;
+            pointer-events: none;
+        }
+
+        .divider-track.minute-flash .divider-fill {
+            animation: barFlash 0.75s ease-out;
+        }
+
+        @keyframes barFlash {
+            0% { filter: brightness(2.2); box-shadow: 0 0 36px #ffffff; }
+            100% { filter: brightness(1); box-shadow: 0 0 18px var(--theme-glow); }
+        }
+
+        /* Date Display (scales with --fg-zoom) */
+        .date {
+            font-size: calc(min(8.5vw, 13vh) * var(--fg-zoom));
+            line-height: 1.05;
+            font-weight: 400;
+            letter-spacing: 0.14em;
+            white-space: nowrap;
+            color: rgba(255, 255, 255, 0.88);
+            text-shadow: 0 0 24px var(--theme-soft);
+        }
+
+        /* Floating Settings Button (Bottom Right) */
+        .settings-fab {
+            position: fixed;
+            bottom: max(20px, env(safe-area-inset-bottom));
+            right: max(20px, env(safe-area-inset-right));
+            z-index: 30;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(12, 16, 22, 0.55);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            color: rgba(255, 255, 255, 0.75);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            opacity: 0.42;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+            transition: opacity 0.3s ease, transform 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .settings-fab:hover,
+        .settings-fab.active {
+            opacity: 1;
+            color: #ffffff;
+            border-color: var(--theme-color);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6), 0 0 18px var(--theme-soft);
+        }
+
+        .settings-fab:hover svg {
+            transform: rotate(35deg);
+        }
+
+        .settings-fab svg {
+            width: 21px;
+            height: 21px;
+            transition: transform 0.4s ease;
+        }
+
+        /* Side Panel Backdrop & Drawer */
+        .panel-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 35;
+            background: rgba(0, 0, 0, 0.42);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.35s ease;
+        }
+
+        .panel-backdrop.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .side-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: min(360px, 88vw);
+            z-index: 40;
+            background: rgba(10, 14, 19, 0.82);
+            backdrop-filter: blur(26px) saturate(150%);
+            -webkit-backdrop-filter: blur(26px) saturate(150%);
+            border-left: 1px solid rgba(255, 255, 255, 0.11);
+            box-shadow: -20px 0 60px rgba(0, 0, 0, 0.65);
+            padding: max(24px, env(safe-area-inset-top)) 22px max(24px, env(safe-area-inset-bottom));
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+            color: #eef2f6;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            transform: translateX(102%);
+            transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .side-panel.open {
+            transform: translateX(0);
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .panel-close {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 18px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+
+        .panel-close:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #ffffff;
+        }
+
+        .setting-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .setting-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.85);
+            letter-spacing: 0.03em;
+        }
+
+        .setting-value {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--theme-color);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Segmented Control (12H / 24H) */
+        .segmented {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 3px;
+            gap: 4px;
+        }
+
+        .seg-btn {
+            border: none;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            padding: 8px 10px;
+            border-radius: 7px;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+
+        .seg-btn.active {
+            background: rgba(255, 255, 255, 0.13);
+            color: #ffffff;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        }
+
+        /* Theme Chip Grid */
+        .theme-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .theme-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 11px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(255, 255, 255, 0.78);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+        }
+
+        .theme-chip:hover {
+            background: rgba(255, 255, 255, 0.09);
+        }
+
+        .theme-chip.active {
+            border-color: var(--theme-color);
+            background: rgba(255, 255, 255, 0.11);
+            color: #ffffff;
+        }
+
+        .chip-swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+        }
+
+        .chip-rainbow {
+            background: conic-gradient(from 0deg, #ff3b30, #ffcc00, #34c759, #00c7be, #007aff, #af52de, #ff3b30);
+        }
+
+        .chip-auto {
+            background: linear-gradient(135deg, #38bdf8 0%, #fb923c 50%, #38e07a 100%);
+        }
+
+        /* Custom Hex Row */
+        .custom-color-box {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+        }
+
+        .custom-color-box.visible {
+            display: flex;
+        }
+
+        .color-picker-input {
+            width: 34px;
+            height: 34px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            cursor: pointer;
+            padding: 0;
+            flex-shrink: 0;
+        }
+
+        .color-picker-input::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+
+        .color-picker-input::-webkit-color-swatch {
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 8px;
+        }
+
+        .hex-input {
+            flex: 1;
+            min-width: 0;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            color: #ffffff;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 13px;
+            letter-spacing: 0.06em;
+            padding: 7px 10px;
+            outline: none;
+            text-transform: uppercase;
+            transition: border-color 0.2s ease;
+        }
+
+        .hex-input:focus {
+            border-color: var(--theme-color);
+        }
+
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider-track {
+            position: absolute;
+            inset: 0;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: background 0.25s ease, border-color 0.25s ease;
+        }
+
+        .slider-track::before {
+            content: "";
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 2px;
+            top: 2px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+            transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .switch input:checked + .slider-track {
+            background: var(--theme-color);
+            border-color: transparent;
+        }
+
+        .switch input:checked + .slider-track::before {
+            transform: translateX(20px);
+        }
+
+        /* Range Sliders */
+        .speed-group.disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .range-input {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            outline: none;
+            cursor: pointer;
+        }
+
+        .range-input::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 2px solid var(--theme-color);
+            box-shadow: 0 0 12px var(--theme-glow);
+            cursor: pointer;
+            transition: transform 0.15s ease;
+        }
+
+        .range-input::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
+        }
+
+        .range-input::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 2px solid var(--theme-color);
+            box-shadow: 0 0 12px var(--theme-glow);
+            cursor: pointer;
+        }
+
+        .range-ticks {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.42);
+            margin-top: -2px;
+        }
+
+        .panel-footer {
+            margin-top: auto;
+            padding-top: 14px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.06);
+            color: rgba(255, 255, 255, 0.88);
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background 0.2s ease, border-color 0.2s ease;
+        }
+
+        .action-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ambient-aura"></div>
+    <canvas id="flow-canvas"></canvas>
+    <div class="vignette"></div>
+
+    <main class="stage">
+        <div class="clock-container" id="clock-card">
+            <div class="time-wrap">
+                <div class="time">
+                    <span class="digit" id="hours">00</span><span class="colon">:</span><span class="digit" id="mins">00</span><span class="colon">:</span><span class="digit" id="secs">00</span>
+                </div>
+                <span class="ampm" id="ampm">AM</span>
+            </div>
+
+            <div class="divider-track" id="divider-track">
+                <div class="divider-fill" id="divider-fill"></div>
+                <div class="divider-spark" id="divider-spark"></div>
+            </div>
+
+            <div class="date" id="date">SUN, 01 JAN</div>
+        </div>
+    </main>
+
+    <!-- Floating Settings Button (Bottom Right) -->
+    <button class="settings-fab" id="settings-fab" aria-label="Open Settings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+    </button>
+
+    <!-- Slide-out Side Panel -->
+    <div class="panel-backdrop" id="panel-backdrop"></div>
+    <aside class="side-panel" id="side-panel" aria-hidden="true">
+        <div class="panel-header">
+            <span class="panel-title">Settings</span>
+            <button class="panel-close" id="panel-close" aria-label="Close Settings">&times;</button>
+        </div>
+
+        <!-- Time Format -->
+        <div class="setting-group">
+            <span class="setting-label">Time Format</span>
+            <div class="segmented">
+                <button class="seg-btn active" data-format="24">24H</button>
+                <button class="seg-btn" data-format="12">12H</button>
+            </div>
+        </div>
+
+        <!-- Theme -->
+        <div class="setting-group">
+            <span class="setting-label">Theme</span>
+            <div class="theme-grid" id="theme-grid">
+                <button class="theme-chip active" data-theme="auto">
+                    <span class="chip-swatch chip-auto"></span>Auto
+                </button>
+                <button class="theme-chip" data-theme="sky">
+                    <span class="chip-swatch" style="background:#38bdf8"></span>Sky
+                </button>
+                <button class="theme-chip" data-theme="amber">
+                    <span class="chip-swatch" style="background:#fb923c"></span>Amber
+                </button>
+                <button class="theme-chip" data-theme="emerald">
+                    <span class="chip-swatch" style="background:#38e07a"></span>Emerald
+                </button>
+                <button class="theme-chip" data-theme="amethyst">
+                    <span class="chip-swatch" style="background:#c084fc"></span>Amethyst
+                </button>
+                <button class="theme-chip" data-theme="rainbow">
+                    <span class="chip-swatch chip-rainbow"></span>Rainbow
+                </button>
+                <button class="theme-chip" data-theme="custom" style="grid-column: span 2;">
+                    <span class="chip-swatch" id="custom-chip-swatch" style="background:#38e07a"></span>Custom Hex
+                </button>
+            </div>
+
+            <div class="custom-color-box" id="custom-color-box">
+                <input type="color" class="color-picker-input" id="color-picker" value="#38e07a" aria-label="Pick custom color">
+                <input type="text" class="hex-input" id="hex-input" value="#38E07A" maxlength="7" placeholder="#000000" aria-label="Hex color code">
+            </div>
+        </div>
+
+        <!-- Foreground Zoom -->
+        <div class="setting-group">
+            <div class="setting-row">
+                <span class="setting-label">Foreground Zoom</span>
+                <span class="setting-value" id="zoom-value">100%</span>
+            </div>
+            <input type="range" class="range-input" id="zoom-slider" min="100" max="200" step="1" value="100">
+            <div class="range-ticks">
+                <span>100%</span><span>150%</span><span>200%</span>
+            </div>
+        </div>
+
+        <!-- Background Animations -->
+        <div class="setting-group">
+            <div class="setting-row">
+                <span class="setting-label">Background Animations</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-bg-anim" checked>
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Background Animation Speed -->
+        <div class="setting-group speed-group" id="speed-group">
+            <div class="setting-row">
+                <span class="setting-label">Animation Speed</span>
+                <span class="setting-value" id="speed-value">1x</span>
+            </div>
+            <input type="range" class="range-input" id="speed-slider" min="1" max="10" step="1" value="1">
+            <div class="range-ticks">
+                <span>1x</span><span>5x</span><span>10x</span>
+            </div>
+        </div>
+
+        <!-- Frosted Glass Background -->
+        <div class="setting-group">
+            <div class="setting-row">
+                <span class="setting-label">Frosted Glass Background</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-frost" checked>
+                    <span class="slider-track"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="panel-footer">
+            <button class="action-btn" id="btn-full">Toggle Fullscreen</button>
+        </div>
+    </aside>
+
+    <script>
+        // --- DOM REFERENCES ---
+        const hoursEl = document.getElementById('hours');
+        const minsEl = document.getElementById('mins');
+        const secsEl = document.getElementById('secs');
+        const ampmEl = document.getElementById('ampm');
+        const dateEl = document.getElementById('date');
+        const dividerTrack = document.getElementById('divider-track');
+        const dividerFill = document.getElementById('divider-fill');
+        const dividerSpark = document.getElementById('divider-spark');
+        const clockCard = document.getElementById('clock-card');
+        const canvas = document.getElementById('flow-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Panel & Controls
+        const settingsFab = document.getElementById('settings-fab');
+        const panelBackdrop = document.getElementById('panel-backdrop');
+        const sidePanel = document.getElementById('side-panel');
+        const panelClose = document.getElementById('panel-close');
+        const formatBtns = document.querySelectorAll('[data-format]');
+        const themeChips = document.querySelectorAll('[data-theme]');
+        const customColorBox = document.getElementById('custom-color-box');
+        const customChipSwatch = document.getElementById('custom-chip-swatch');
+        const colorPicker = document.getElementById('color-picker');
+        const hexInput = document.getElementById('hex-input');
+        const zoomSlider = document.getElementById('zoom-slider');
+        const zoomValueEl = document.getElementById('zoom-value');
+        const toggleBgAnim = document.getElementById('toggle-bg-anim');
+        const speedGroup = document.getElementById('speed-group');
+        const speedSlider = document.getElementById('speed-slider');
+        const speedValueEl = document.getElementById('speed-value');
+        const toggleFrost = document.getElementById('toggle-frost');
+        const btnFull = document.getElementById('btn-full');
+
+        // --- STATE & STORAGE ---
+        const STORAGE_KEY = 'dynamic_flow_clock_settings_v2';
+        const state = {
+            use12Hour: false,
+            themeMode: 'auto', // auto | sky | amber | emerald | amethyst | custom | rainbow
+            customHex: '#38e07a',
+            fgZoom: 100,       // 100 - 200 (%)
+            bgAnimOn: true,
+            bgAnimSpeed: 1,
+            frostedGlass: true
+        };
+
+        function loadSettings() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                if (typeof parsed.use12Hour === 'boolean') state.use12Hour = parsed.use12Hour;
+                if (typeof parsed.themeMode === 'string') state.themeMode = parsed.themeMode;
+                if (typeof parsed.customHex === 'string' && isValidHex(parsed.customHex)) {
+                    state.customHex = normalizeHex(parsed.customHex);
+                }
+                if (typeof parsed.fgZoom === 'number') {
+                    state.fgZoom = Math.min(200, Math.max(100, parsed.fgZoom));
+                }
+                if (typeof parsed.bgAnimOn === 'boolean') state.bgAnimOn = parsed.bgAnimOn;
+                if (typeof parsed.bgAnimSpeed === 'number') {
+                    state.bgAnimSpeed = Math.min(10, Math.max(1, parsed.bgAnimSpeed));
+                }
+                if (typeof parsed.frostedGlass === 'boolean') state.frostedGlass = parsed.frostedGlass;
+            } catch (_) {}
+        }
+
+        function saveSettings() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            } catch (_) {}
+        }
+
+        // --- COLOR UTILITIES ---
+        function isValidHex(val) {
+            return /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(val.trim());
+        }
+
+        function normalizeHex(val) {
+            let h = val.trim().replace(/^#/, '');
+            if (h.length === 3) {
+                h = h.split('').map(c => c + c).join('');
+            }
+            return '#' + h.toLowerCase();
+        }
+
+        function hexToRgb(hex) {
+            const clean = normalizeHex(hex).slice(1);
+            const num = parseInt(clean, 16);
+            return {
+                r: (num >> 16) & 255,
+                g: (num >> 8) & 255,
+                b: num & 255
+            };
+        }
+
+        function rgbToHex(r, g, b) {
+            const toHex = n => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+            return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+        }
+
+        function hslToRgb(h, s, l) {
+            s /= 100;
+            l /= 100;
+            const k = n => (n + h / 30) % 12;
+            const a = s * Math.min(l, 1 - l);
+            const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+            return {
+                r: Math.round(255 * f(0)),
+                g: Math.round(255 * f(8)),
+                b: Math.round(255 * f(4))
+            };
+        }
+
+        const PRESET_THEMES = {
+            sky:      { hex: '#38bdf8', accent: '#818cf8', bg: '#030812', r: 56,  g: 189, b: 248 },
+            amber:    { hex: '#fb923c', accent: '#f43f5e', bg: '#100605', r: 251, g: 146, b: 60  },
+            emerald:  { hex: '#38e07a', accent: '#2dd4bf', bg: '#030b07', r: 56,  g: 224, b: 122 },
+            amethyst: { hex: '#c084fc', accent: '#ec4899', bg: '#0a0412', r: 192, g: 132, b: 252 }
+        };
+
+        // --- CLOCK & THEME STATE ---
+        let lastHour = '';
+        let lastMinute = '';
+        let lastSecond = '';
+        let lastDateStr = '';
+        let activeThemeSignature = '';
+        let rainbowHue = 145;
+
+        let targetR = 56, targetG = 224, targetB = 122;
+        let currentR = 56, currentG = 224, currentB = 122;
+
+        // Parallax pointer state
+        let pointerX = 0, pointerY = 0;
+        let smoothPX = 0, smoothPY = 0;
+
+        function applyColorVariables(hex, r, g, b, bgHex) {
+            const root = document.documentElement.style;
+            root.setProperty('--theme-color', hex);
+            root.setProperty('--theme-accent', hex);
+            root.setProperty('--theme-glow', `rgba(${r}, ${g}, ${b}, 0.55)`);
+            root.setProperty('--theme-soft', `rgba(${r}, ${g}, ${b}, 0.14)`);
+            root.setProperty('--bg-tint', bgHex);
+        }
+
+        function resolveAutoKey(hour) {
+            if (hour >= 6 && hour < 17) return 'sky';
+            if (hour >= 17 && hour < 20) return 'amber';
+            return 'emerald';
+        }
+
+        function applyTheme(hour, force = false) {
+            if (state.themeMode === 'rainbow') {
+                document.body.classList.add('rainbow-active');
+                activeThemeSignature = 'rainbow';
+                return;
+            }
+            document.body.classList.remove('rainbow-active');
+
+            if (state.themeMode === 'custom') {
+                const sig = `custom:${state.customHex}`;
+                if (!force && sig === activeThemeSignature) return;
+                activeThemeSignature = sig;
+
+                const { r, g, b } = hexToRgb(state.customHex);
+                targetR = r; targetG = g; targetB = b;
+                const bg = rgbToHex(Math.round(r * 0.04) + 2, Math.round(g * 0.04) + 3, Math.round(b * 0.04) + 5);
+                applyColorVariables(state.customHex, r, g, b, bg);
+                return;
+            }
+
+            const key = state.themeMode === 'auto' ? resolveAutoKey(hour) : state.themeMode;
+            const sig = `preset:${key}`;
+            if (!force && sig === activeThemeSignature) return;
+            activeThemeSignature = sig;
+
+            const t = PRESET_THEMES[key] || PRESET_THEMES.emerald;
+            targetR = t.r; targetG = t.g; targetB = t.b;
+            applyColorVariables(t.hex, t.r, t.g, t.b, t.bg);
+        }
+
+        // Clear animation cleanly after completion so Rainbow color inheritance is never blocked
+        [hoursEl, minsEl, secsEl].forEach(el => {
+            el.addEventListener('animationend', () => {
+                el.style.animation = 'none';
+            });
+        });
+        dividerTrack.addEventListener('animationend', () => {
+            dividerTrack.classList.remove('minute-flash');
+        });
+
+        function triggerFlash(el) {
+            el.style.animation = 'none';
+            void el.offsetWidth;
+            el.style.animation = 'flashWhite 0.85s cubic-bezier(0.215, 0.610, 0.355, 1.000)';
+        }
+
+        const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+        const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+        function updateClock() {
+            const now = new Date();
+            const rawHour = now.getHours();
+            applyTheme(rawHour);
+
+            let displayHour = rawHour;
+            if (state.use12Hour) {
+                const isPM = rawHour >= 12;
+                displayHour = rawHour % 12 || 12;
+                ampmEl.textContent = isPM ? 'PM' : 'AM';
+                ampmEl.classList.add('visible');
+            } else {
+                ampmEl.classList.remove('visible');
+            }
+
+            const hours = displayHour.toString().padStart(2, '0');
+            const mins = now.getMinutes().toString().padStart(2, '0');
+            const secsNum = now.getSeconds();
+            const secs = secsNum.toString().padStart(2, '0');
+            const ms = now.getMilliseconds();
+
+            if (hours !== lastHour) {
+                hoursEl.textContent = hours;
+                if (lastHour !== '') triggerFlash(hoursEl);
+                lastHour = hours;
+            }
+
+            if (mins !== lastMinute) {
+                minsEl.textContent = mins;
+                if (lastMinute !== '') {
+                    triggerFlash(minsEl);
+                    dividerTrack.classList.remove('minute-flash');
+                    void dividerTrack.offsetWidth;
+                    dividerTrack.classList.add('minute-flash');
+                }
+                lastMinute = mins;
+            }
+
+            if (secs !== lastSecond) {
+                secsEl.textContent = secs;
+                if (lastSecond !== '') triggerFlash(secsEl);
+                lastSecond = secs;
+            }
+
+            const progress = Math.min(1, (secsNum + ms / 1000) / 60);
+            dividerFill.style.transform = `scaleX(${progress})`;
+            dividerSpark.style.left = `${progress * 100}%`;
+
+            const dateStr = `${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]}`;
+            if (dateStr !== lastDateStr) {
+                dateEl.textContent = dateStr;
+                lastDateStr = dateStr;
+            }
+        }
+
+        // --- UI SYNC & EVENT HANDLERS ---
+        function openPanel() {
+            sidePanel.classList.add('open');
+            panelBackdrop.classList.add('open');
+            settingsFab.classList.add('active');
+            sidePanel.setAttribute('aria-hidden', 'false');
+        }
+
+        function closePanel() {
+            sidePanel.classList.remove('open');
+            panelBackdrop.classList.remove('open');
+            settingsFab.classList.remove('active');
+            sidePanel.setAttribute('aria-hidden', 'true');
+        }
+
+        settingsFab.addEventListener('click', () => {
+            if (sidePanel.classList.contains('open')) closePanel();
+            else openPanel();
+        });
+        panelClose.addEventListener('click', closePanel);
+        panelBackdrop.addEventListener('click', closePanel);
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && sidePanel.classList.contains('open')) closePanel();
+        });
+
+        function syncUI() {
+            formatBtns.forEach(btn => {
+                const is12 = btn.dataset.format === '12';
+                btn.classList.toggle('active', is12 === state.use12Hour);
+            });
+
+            themeChips.forEach(chip => {
+                chip.classList.toggle('active', chip.dataset.theme === state.themeMode);
+            });
+
+            customColorBox.classList.toggle('visible', state.themeMode === 'custom');
+            customChipSwatch.style.background = state.customHex;
+            colorPicker.value = state.customHex;
+            if (document.activeElement !== hexInput) {
+                hexInput.value = state.customHex.toUpperCase();
+            }
+
+            document.documentElement.style.setProperty('--fg-zoom', state.fgZoom / 100);
+            zoomSlider.value = state.fgZoom;
+            zoomValueEl.textContent = `${state.fgZoom}%`;
+
+            toggleBgAnim.checked = state.bgAnimOn;
+            canvas.classList.toggle('hidden', !state.bgAnimOn);
+            speedGroup.classList.toggle('disabled', !state.bgAnimOn);
+
+            speedSlider.value = state.bgAnimSpeed;
+            speedValueEl.textContent = `${state.bgAnimSpeed}x`;
+
+            toggleFrost.checked = state.frostedGlass;
+            clockCard.classList.toggle('no-frost', !state.frostedGlass);
+        }
+
+        formatBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.use12Hour = btn.dataset.format === '12';
+                lastHour = '';
+                syncUI();
+                saveSettings();
+            });
+        });
+
+        themeChips.forEach(chip => {
+            chip.addEventListener('click', () => {
+                state.themeMode = chip.dataset.theme;
+                activeThemeSignature = '';
+                syncUI();
+                applyTheme(new Date().getHours(), true);
+                saveSettings();
+            });
+        });
+
+        colorPicker.addEventListener('input', (e) => {
+            state.customHex = normalizeHex(e.target.value);
+            hexInput.value = state.customHex.toUpperCase();
+            customChipSwatch.style.background = state.customHex;
+            if (state.themeMode !== 'custom') state.themeMode = 'custom';
+            syncUI();
+            applyTheme(new Date().getHours(), true);
+            saveSettings();
+        });
+
+        hexInput.addEventListener('input', (e) => {
+            const val = e.target.value;
+            if (isValidHex(val)) {
+                state.customHex = normalizeHex(val);
+                colorPicker.value = state.customHex;
+                customChipSwatch.style.background = state.customHex;
+                if (state.themeMode !== 'custom') state.themeMode = 'custom';
+                applyTheme(new Date().getHours(), true);
+                saveSettings();
+            }
+        });
+
+        hexInput.addEventListener('blur', () => {
+            hexInput.value = state.customHex.toUpperCase();
+        });
+
+        zoomSlider.addEventListener('input', () => {
+            state.fgZoom = Number(zoomSlider.value);
+            document.documentElement.style.setProperty('--fg-zoom', state.fgZoom / 100);
+            zoomValueEl.textContent = `${state.fgZoom}%`;
+            saveSettings();
+        });
+
+        toggleBgAnim.addEventListener('change', () => {
+            state.bgAnimOn = toggleBgAnim.checked;
+            syncUI();
+            saveSettings();
+        });
+
+        speedSlider.addEventListener('input', () => {
+            state.bgAnimSpeed = Number(speedSlider.value);
+            speedValueEl.textContent = `${state.bgAnimSpeed}x`;
+            saveSettings();
+        });
+
+        toggleFrost.addEventListener('change', () => {
+            state.frostedGlass = toggleFrost.checked;
+            syncUI();
+            saveSettings();
+        });
+
+        btnFull.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen?.().catch(() => {});
+            } else {
+                document.exitFullscreen?.();
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            pointerX = (e.clientX / window.innerWidth - 0.5) * 2;
+            pointerY = (e.clientY / window.innerHeight - 0.5) * 2;
+        });
+
+        window.addEventListener('touchstart', (e) => {
+            if (e.touches[0]) {
+                pointerX = (e.touches[0].clientX / window.innerWidth - 0.5) * 2;
+                pointerY = (e.touches[0].clientY / window.innerHeight - 0.5) * 2;
+            }
+        }, { passive: true });
+
+        // --- AURORA FLOW + BOKEH CANVAS ---
+        let width = 0, height = 0, dpr = 1;
+        let particles = [];
+        let orbs = [];
+
+        function resize() {
+            dpr = Math.min(window.devicePixelRatio || 1, 2);
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            particles = Array.from({ length: 55 }, () => ({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                size: Math.random() * 2 + 0.6,
+                speedX: (Math.random() - 0.5) * 0.35,
+                speedY: -(Math.random() * 0.45 + 0.1),
+                baseOpacity: Math.random() * 0.5 + 0.15,
+                phase: Math.random() * Math.PI * 2
+            }));
+
+            orbs = Array.from({ length: 8 }, () => ({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                radius: Math.random() * 90 + 50,
+                speedX: (Math.random() - 0.5) * 0.25,
+                speedY: (Math.random() - 0.5) * 0.25,
+                alpha: Math.random() * 0.05 + 0.02
+            }));
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        let lastFrameTime = performance.now();
+        let flowTime = 0;
+
+        function loop(now) {
+            const dt = Math.min(0.1, (now - lastFrameTime) / 1000);
+            lastFrameTime = now;
+
+            updateClock();
+
+            // Continuous RGB cycling when Rainbow theme is active
+            if (state.themeMode === 'rainbow') {
+                rainbowHue = (rainbowHue + dt * 32) % 360;
+                const { r, g, b } = hslToRgb(rainbowHue, 88, 63);
+                const hex = rgbToHex(r, g, b);
+                const bg = rgbToHex(Math.round(r * 0.04) + 2, Math.round(g * 0.04) + 3, Math.round(b * 0.04) + 5);
+                targetR = currentR = r;
+                targetG = currentG = g;
+                targetB = currentB = b;
+                applyColorVariables(hex, r, g, b, bg);
+            } else {
+                currentR += (targetR - currentR) * 0.05;
+                currentG += (targetG - currentG) * 0.05;
+                currentB += (targetB - currentB) * 0.05;
+            }
+
+            // Parallax tilt on frosted card
+            if (state.frostedGlass && state.bgAnimOn) {
+                smoothPX += (pointerX - smoothPX) * 0.06;
+                smoothPY += (pointerY - smoothPY) * 0.06;
+                clockCard.style.transform = `rotateY(${smoothPX * 3.2}deg) rotateX(${-smoothPY * 3.2}deg)`;
+            } else {
+                clockCard.style.transform = '';
+            }
+
+            if (state.bgAnimOn) {
+                const speed = state.bgAnimSpeed;
+                const frameScale = dt * 60 * speed;
+                flowTime += dt * 0.24 * speed;
+
+                const r = Math.round(currentR);
+                const g = Math.round(currentG);
+                const b = Math.round(currentB);
+
+                ctx.clearRect(0, 0, width, height);
+
+                // Bokeh orbs
+                orbs.forEach(o => {
+                    o.x += o.speedX * frameScale;
+                    o.y += o.speedY * frameScale;
+                    if (o.x < -o.radius) o.x = width + o.radius;
+                    if (o.x > width + o.radius) o.x = -o.radius;
+                    if (o.y < -o.radius) o.y = height + o.radius;
+                    if (o.y > height + o.radius) o.y = -o.radius;
+
+                    const grad = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.radius);
+                    grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${o.alpha})`);
+                    grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(o.x, o.y, o.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                // 4 Silky Layered Aurora Ribbon Waves
+                for (let i = 0; i < 4; i++) {
+                    const parallaxShift = smoothPX * (18 + i * 10);
+                    const startY = height * (0.48 + i * 0.11);
+                    const endY = height * (0.28 + i * 0.14);
+
+                    const cp1x = width * 0.28 + Math.sin(flowTime * (0.9 + i * 0.1) + i * 1.3) * (width * 0.24) + parallaxShift;
+                    const cp1y = height * 0.18 + Math.cos(flowTime * 0.75 + i) * (height * 0.32);
+                    const cp2x = width * 0.72 + Math.cos(flowTime * 1.1 - i * 1.1) * (width * 0.24) + parallaxShift;
+                    const cp2y = height * 0.78 + Math.sin(flowTime * 0.85 - i) * (height * 0.32);
+
+                    ctx.beginPath();
+                    ctx.moveTo(-120, startY);
+                    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, width + 120, endY);
+                    ctx.lineTo(width + 120, height + 120);
+                    ctx.lineTo(-120, height + 120);
+                    ctx.closePath();
+
+                    const waveGrad = ctx.createLinearGradient(0, height * 0.2, 0, height);
+                    waveGrad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.065 + i * 0.015})`);
+                    waveGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                    ctx.fillStyle = waveGrad;
+                    ctx.fill();
+
+                    ctx.beginPath();
+                    ctx.moveTo(-120, startY);
+                    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, width + 120, endY);
+                    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.09 + i * 0.025})`;
+                    ctx.lineWidth = 7;
+                    ctx.stroke();
+
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${0.07 + i * 0.02})`;
+                    ctx.lineWidth = 1.25;
+                    ctx.stroke();
+                }
+
+                // Sparkling Dust Particles
+                particles.forEach(p => {
+                    p.x += (p.speedX + Math.sin(flowTime * 2 + p.phase) * 0.15) * frameScale;
+                    p.y += p.speedY * frameScale;
+
+                    if (p.y < -10) p.y = height + 10;
+                    if (p.x < -10) p.x = width + 10;
+                    if (p.x > width + 10) p.x = -10;
+
+                    const twinkle = p.baseOpacity + Math.sin(flowTime * 6 + p.phase) * 0.25;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${Math.max(0.05, twinkle)})`;
+                    ctx.fill();
+                });
+            }
+
+            requestAnimationFrame(loop);
+        }
+
+        // --- INIT ---
+        loadSettings();
+        syncUI();
+        applyTheme(new Date().getHours(), true);
+        currentR = targetR;
+        currentG = targetG;
+        currentB = targetB;
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html>
